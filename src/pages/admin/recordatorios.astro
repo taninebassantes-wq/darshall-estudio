@@ -5,21 +5,25 @@ import type { ReminderCandidate } from '../../types/database';
 
 export const prerender = false;
 
+const url = new URL(Astro.request.url);
+// Por defecto en 'test' para que durante las pruebas se vean inmediatamente las clientas atendidas hoy
+const mode = url.searchParams.get('mode') || 'test'; 
+
 const now = new Date();
 const siteUrl = process.env.PUBLIC_SITE_URL || 'https://darshall-estudio.vercel.app';
 const studioName = process.env.PUBLIC_STUDIO_NAME || 'Darshall Estudio';
 
-// Ventana de 3 semanas: Citas completadas entre hace 19 y 23 días
+// Ventana de 3 semanas para modo estricto
 const daysTarget = 21;
-const dateStart = new Date(now.getTime() - (daysTarget + 2) * 24 * 60 * 60 * 1000).toISOString();
-const dateEnd = new Date(now.getTime() - (daysTarget - 2) * 24 * 60 * 60 * 1000).toISOString();
+const dateStartStrict = new Date(now.getTime() - (daysTarget + 2) * 24 * 60 * 60 * 1000).toISOString();
+const dateEndStrict = new Date(now.getTime() - (daysTarget - 2) * 24 * 60 * 60 * 1000).toISOString();
 
 const candidates: ReminderCandidate[] = [];
 const alreadyRetainedClients: Array<{ name: string; phone: string; nextDate: string }> = [];
 
 try {
-  // 1. Obtener citas completadas en esa ventana
-  const { data: pastAppointments } = await supabaseAdmin
+  // Construir consulta según el modo
+  let query = supabaseAdmin
     .from('appointments')
     .select(`
       id,
@@ -31,9 +35,14 @@ try {
       specialists ( full_name )
     `)
     .eq('status', 'completed')
-    .gte('appointment_date', dateStart)
-    .lte('appointment_date', dateEnd)
     .order('appointment_date', { ascending: false });
+
+  // Si está en modo estricto de producción, filtrar a ~21 días
+  if (mode === 'production') {
+    query = query.gte('appointment_date', dateStartStrict).lte('appointment_date', dateEndStrict);
+  }
+
+  const { data: pastAppointments } = await query;
 
   for (const app of (pastAppointments as any[] || [])) {
     const client = app.clients;
@@ -66,7 +75,7 @@ try {
       .maybeSingle();
 
     const appDate = new Date(app.appointment_date);
-    const diffDays = Math.round((now.getTime() - appDate.getTime()) / (1000 * 3600 * 24));
+    const diffDays = Math.max(0, Math.round((now.getTime() - appDate.getTime()) / (1000 * 3600 * 24)));
 
     const messageText = `Hola ${client.full_name}, se cumplen 3 semanas desde tu último servicio de uñas en ${studioName}. ¡Es momento de tu mantenimiento para mantener tus uñas sanas e impecables! Agenda tu espacio aquí: ${siteUrl}/#agendar`;
     const cleanPhone = client.whatsapp_phone.replace(/[^0-9]/g, '');
@@ -92,17 +101,58 @@ try {
 }
 ---
 
-<AdminLayout title="Motor de Recordatorios WhatsApp (3 Semanas)" activeTab="recordatorios">
-  <!-- Banner Informativo de Lógica -->
+<AdminLayout title="Motor de Recordatorios WhatsApp" activeTab="recordatorios">
+  <!-- Selector de Modo de Visualización -->
+  <div class="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+    <div class="flex items-center gap-2">
+      <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Modo de Visualización:</span>
+      <div class="inline-flex rounded-xl p-1 bg-slate-100 border border-slate-200 text-xs">
+        <a
+          href="/admin/recordatorios?mode=test"
+          class={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+            mode === 'test'
+              ? 'bg-studio-600 text-white shadow-sm'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          🧪 Modo Pruebas (Inmediato)
+        </a>
+        <a
+          href="/admin/recordatorios?mode=production"
+          class={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+            mode === 'production'
+              ? 'bg-studio-600 text-white shadow-sm'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          ⏱ Producción (Exacto 21 días)
+        </a>
+      </div>
+    </div>
+
+    <div class="text-xs text-slate-500">
+      {mode === 'test' ? (
+        <span class="text-studio-700 font-semibold bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
+          ✓ Modo Pruebas Activo: Cualquier cita que marques como "Completada" aparecerá aquí al instante.
+        </span>
+      ) : (
+        <span class="text-slate-600">
+          Modo Producción: Mostrando solo citas completadas hace 21 días (3 semanas).
+        </span>
+      )}
+    </div>
+  </div>
+
+  <!-- Banner Informativo -->
   <div class="bg-gradient-to-r from-emerald-50 via-teal-50 to-white p-6 rounded-2xl border border-emerald-200/80 shadow-sm mb-8">
     <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
       <div>
         <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 uppercase tracking-wide">
-          Algoritmo de Retención Activo
+          Algoritmo de Retención Inteligente
         </span>
         <h2 class="font-serif text-xl font-bold text-slate-900 mt-1">Recordatorio Preventivo de Mantenimiento</h2>
         <p class="text-xs text-slate-600 max-w-2xl mt-1">
-          Filtra citas completadas hace exactamente 21 días (3 semanas). Si la clienta <strong>ya tiene una cita agendada en el futuro</strong>, el sistema la descarta automáticamente para no causarle molestias.
+          Detecta las clientas atendidas. Si la clienta <strong>ya tiene una cita futura agendada en el sistema</strong>, la descarta automáticamente para evitar mensajes innecesarios.
         </p>
       </div>
 
@@ -116,10 +166,10 @@ try {
         </button>
         <button
           type="button"
-          onclick="triggerAutomatedCron()"
+          onclick={`triggerAutomatedCron('${mode}')`}
           class="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all"
         >
-          ⚡ Ejecutar Escaneo Cron
+          ⚡ Ejecutar Escaneo
         </button>
       </div>
     </div>
@@ -144,7 +194,9 @@ try {
       <span class="font-serif text-3xl font-bold text-slate-800 block mt-1">
         {candidates.length + alreadyRetainedClients.length}
       </span>
-      <span class="text-[11px] text-slate-400 mt-1 block">Ventana 19-23 días atrás</span>
+      <span class="text-[11px] text-slate-400 mt-1 block">
+        {mode === 'test' ? 'Todas las atendidas sin cita futura' : 'Ventana 19-23 días'}
+      </span>
     </div>
   </div>
 
@@ -152,17 +204,17 @@ try {
   <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-8">
     <div class="flex items-center justify-between mb-4">
       <h3 class="font-serif text-lg font-bold text-slate-900">
-        Clientas Pendientes de Recordatorio (Mantenimiento 3 Semanas)
+        Clientas Pendientes de Recordatorio
       </h3>
       <span class="text-xs text-slate-500">Un clic para abrir WhatsApp con plantilla personalizada</span>
     </div>
 
     {candidates.length === 0 ? (
       <div class="text-center py-12 border border-dashed border-slate-200 rounded-2xl">
-        <span class="text-3xl">✨</span>
-        <h4 class="font-serif font-bold text-slate-800 mt-2">¡Todo al día!</h4>
+        <span class="text-3xl">💅</span>
+        <h4 class="font-serif font-bold text-slate-800 mt-2">No hay clientas pendientes en esta lista</h4>
         <p class="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-          No hay clientas pendientes de recordatorio en este momento o todas las de hace 3 semanas ya tienen cita agendada.
+          Crea una cita en <a href="/" class="text-studio-600 underline">Agendar</a>, márcala como <strong class="text-emerald-700">"Completada"</strong> en la <a href="/admin/agenda" class="text-studio-600 underline">Agenda</a> y aparecerá aquí inmediatamente para que la pruebes.
         </p>
       </div>
     ) : (
@@ -173,7 +225,7 @@ try {
               <th class="pb-3">Clienta</th>
               <th class="pb-3">Último Servicio</th>
               <th class="pb-3">Manicurista</th>
-              <th class="pb-3 text-center">Días Transcurridos</th>
+              <th class="pb-3 text-center">Antigüedad</th>
               <th class="pb-3 text-center">Estado Notificación</th>
               <th class="pb-3 text-right">Acción WhatsApp</th>
             </tr>
@@ -194,7 +246,7 @@ try {
                   <td class="py-3.5 text-slate-700">{c.specialist_name}</td>
                   <td class="py-3.5 text-center">
                     <span class="px-2.5 py-1 rounded-full font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                      Hace {c.days_since} días
+                      {c.days_since === 0 ? 'Atendida hoy' : `Hace ${c.days_since} días`}
                     </span>
                   </td>
                   <td class="py-3.5 text-center">
@@ -203,7 +255,7 @@ try {
                         Ya Notificada ✓
                       </span>
                     ) : (
-                      <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700">
+                      <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 animate-pulse">
                         Pendiente
                       </span>
                     )}
@@ -233,7 +285,7 @@ try {
     <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
       <h3 class="font-serif text-base font-bold text-emerald-800 flex items-center gap-2 mb-3">
         <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-        Clientas con Cita Futura Confirmada (Excluidas de Recordatorio)
+        Clientas con Cita Futura Confirmada (Excluidas Automáticamente)
       </h3>
       <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
         {alreadyRetainedClients.map((client) => {
@@ -269,18 +321,18 @@ try {
       }
     }
 
-    async function triggerAutomatedCron() {
+    async function triggerAutomatedCron(mode) {
       const btn = event.target;
       btn.textContent = 'Ejecutando...';
       try {
-        const res = await fetch('/api/cron/reminders?manual=true');
+        const res = await fetch(`/api/cron/reminders?manual=true&mode=${mode}`);
         const data = await res.json();
         alert(`Escaneo completado exitosamente.\nTotal analizadas: ${data.total_examined}\nCandidatas a recordar: ${data.candidates_to_remind}\nOmitidas por ya tener cita futura: ${data.skipped_already_booked}`);
         window.location.reload();
       } catch (err) {
         alert('Error en ejecución: ' + err.message);
       } finally {
-        btn.textContent = '⚡ Ejecutar Escaneo Cron';
+        btn.textContent = '⚡ Ejecutar Escaneo';
       }
     }
   </script>

@@ -10,6 +10,7 @@ export const ALL: APIRoute = async ({ request, url }) => {
     const authHeader = request.headers.get('Authorization');
     const cronSecret = process.env.CRON_SECRET;
     const isManual = url.searchParams.get('manual') === 'true';
+    const mode = url.searchParams.get('mode') || (isManual ? 'test' : 'production');
 
     if (cronSecret && !isManual && authHeader !== `Bearer ${cronSecret}`) {
       // Si no es petición manual desde el admin ni tiene el Bearer secreto
@@ -24,8 +25,8 @@ export const ALL: APIRoute = async ({ request, url }) => {
     const dateStart = new Date(now.getTime() - (daysTarget + 1) * 24 * 60 * 60 * 1000).toISOString();
     const dateEnd = new Date(now.getTime() - (daysTarget - 1) * 24 * 60 * 60 * 1000).toISOString();
 
-    // 2. Obtener todas las citas completadas en esa ventana
-    const { data: pastAppointments, error: fetchError } = await supabaseAdmin
+    // 2. Obtener citas completadas según el modo (test: todas las completadas | production: ~21 días)
+    let query = supabaseAdmin
       .from('appointments')
       .select(`
         id,
@@ -37,9 +38,13 @@ export const ALL: APIRoute = async ({ request, url }) => {
         specialists ( full_name )
       `)
       .eq('status', 'completed')
-      .gte('appointment_date', dateStart)
-      .lte('appointment_date', dateEnd)
       .order('appointment_date', { ascending: false });
+
+    if (mode === 'production') {
+      query = query.gte('appointment_date', dateStart).lte('appointment_date', dateEnd);
+    }
+
+    const { data: pastAppointments, error: fetchError } = await query;
 
     if (fetchError) throw fetchError;
 
