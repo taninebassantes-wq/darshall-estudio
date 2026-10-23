@@ -1,0 +1,470 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { supabase } from '../lib/supabase';
+import type { Service, Specialist } from '../types/database';
+
+export const prerender = false;
+
+// Cargar catálogo de servicios y especialistas activos desde Supabase
+const { data: rawServices } = await supabase
+  .from('services')
+  .select('*')
+  .eq('is_active', true)
+  .order('price', { ascending: true });
+
+const { data: rawSpecialists } = await supabase
+  .from('specialists')
+  .select('*')
+  .eq('is_active', true)
+  .order('full_name', { ascending: true });
+
+const services: Service[] = rawServices || [];
+const specialists: Specialist[] = rawSpecialists || [];
+
+// Fecha de hoy formateada como YYYY-MM-DD para el datepicker
+const today = new Date().toISOString().split('T')[0];
+---
+
+<Layout title="Reserva tu Cita Online">
+  <!-- Hero Section -->
+  <section class="relative overflow-hidden py-16 md:py-24 bg-gradient-to-b from-rose-50/70 via-beige-50/40 to-transparent">
+    <div class="max-w-5xl mx-auto px-4 text-center">
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-100/70 text-studio-700 tracking-wide mb-4">
+        <span class="w-2 h-2 rounded-full bg-studio-500 animate-ping"></span>
+        Agenda Abierta para Esta Semana
+      </span>
+      <h1 class="font-serif text-4xl sm:text-5xl md:text-6xl text-slate-900 font-bold tracking-tight leading-tight">
+        Tu momento de cuidado, <br class="hidden sm:inline" />
+        <span class="text-transparent bg-clip-text bg-gradient-to-r from-studio-600 via-rose-500 to-amber-600">
+          uñas impecables y duraderas
+        </span>
+      </h1>
+      <p class="mt-4 text-base sm:text-lg text-slate-600 max-w-2xl mx-auto font-light">
+        Experiencia de manicura premium con productos de grado dermatológico y profesionales certificadas. Reserva tu espacio en menos de 2 minutos.
+      </p>
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-4">
+        <a href="#agendar" class="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-studio-600 to-studio-500 text-white font-semibold shadow-soft-pink hover:shadow-xl hover:scale-[1.02] active:scale-95 transition-all text-sm tracking-wide">
+          Agendar Cita Ahora
+        </a>
+        <a href="#servicios" class="px-6 py-3.5 rounded-2xl bg-white text-slate-700 font-semibold border border-rose-200/80 hover:bg-rose-50/50 transition-all text-sm">
+          Ver Catálogo y Precios
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Catálogo de Servicios Destacados -->
+  <section id="servicios" class="max-w-6xl mx-auto px-4 sm:px-6 py-12">
+    <div class="flex flex-col md:flex-row md:items-end justify-between mb-10">
+      <div>
+        <p class="text-xs uppercase tracking-[0.2em] font-semibold text-studio-600">Nuestros Tratamientos</p>
+        <h2 class="font-serif text-3xl font-bold text-slate-900 mt-1">Servicios de Estudio</h2>
+      </div>
+      <p class="text-sm text-slate-500 max-w-md mt-2 md:mt-0">
+        Cada procedimiento incluye preparación rusa o combinada de cutícula y garantía de durabilidad.
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {services.map((svc) => (
+        <div class="bg-white rounded-3xl p-6 border border-rose-100/80 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between group">
+          <div>
+            <div class="flex justify-between items-start mb-3">
+              <span class="text-xs font-semibold text-studio-600 bg-studio-50 px-2.5 py-1 rounded-full border border-studio-100">
+                ⏱ {svc.duration_minutes} min
+              </span>
+              <span class="font-serif text-2xl font-bold text-slate-900">
+                ${Number(svc.price).toFixed(2)}
+              </span>
+            </div>
+            <h3 class="font-serif text-xl font-bold text-slate-800 group-hover:text-studio-600 transition-colors">
+              {svc.name}
+            </h3>
+            <p class="text-sm text-slate-600 mt-2 line-clamp-3">
+              {svc.description || 'Tratamiento profesional con acabado de máxima precisión.'}
+            </p>
+          </div>
+          <div class="mt-6 pt-4 border-t border-rose-50 flex items-center justify-between">
+            <button
+              type="button"
+              onclick={`preselectService('${svc.id}')`}
+              class="text-xs font-semibold uppercase tracking-wider text-studio-600 hover:text-studio-800 transition-colors"
+            >
+              Seleccionar servicio →
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <!-- MÓDULO 1: FORMULARIO DINÁMICO DE AGENDAMIENTO PÚBLICO -->
+  <section id="agendar" class="max-w-4xl mx-auto px-4 sm:px-6 py-16">
+    <div class="bg-white rounded-3xl border border-rose-100/90 shadow-xl overflow-hidden">
+      <!-- Form Header -->
+      <div class="bg-gradient-to-r from-studio-50 via-rose-50/50 to-beige-50 p-6 md:p-8 border-b border-rose-100">
+        <h2 class="font-serif text-2xl md:text-3xl font-bold text-slate-900">Reserva tu Cita en Línea</h2>
+        <p class="text-sm text-slate-600 mt-1">
+          Completa los 4 sencillos pasos. La disponibilidad se actualiza en tiempo real.
+        </p>
+      </div>
+
+      <form id="booking-form" class="p-6 md:p-8 space-y-8">
+        
+        <!-- PASO 1: SERVICIO -->
+        <div>
+          <label class="block text-xs uppercase font-bold tracking-wider text-slate-700 mb-3">
+            1. Selecciona el Servicio <span class="text-studio-600">*</span>
+          </label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" id="service-options">
+            {services.map((svc) => (
+              <label class="service-card cursor-pointer border border-slate-200 rounded-2xl p-4 flex items-center justify-between hover:border-studio-400 hover:bg-rose-50/30 transition-all has-[:checked]:border-studio-600 has-[:checked]:bg-studio-50/60 has-[:checked]:ring-2 has-[:checked]:ring-studio-500/20">
+                <div class="flex items-center gap-3">
+                  <input
+                    type="radio"
+                    name="service_id"
+                    value={svc.id}
+                    data-duration={svc.duration_minutes}
+                    data-price={svc.price}
+                    data-name={svc.name}
+                    class="accent-studio-600 w-4 h-4"
+                    required
+                  />
+                  <div>
+                    <span class="block text-sm font-semibold text-slate-800">{svc.name}</span>
+                    <span class="block text-xs text-slate-500">⏱ {svc.duration_minutes} minutos</span>
+                  </div>
+                </div>
+                <span class="font-serif font-bold text-studio-700">${Number(svc.price).toFixed(2)}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <!-- PASO 2: ESPECIALISTA -->
+        <div>
+          <label class="block text-xs uppercase font-bold tracking-wider text-slate-700 mb-3">
+            2. Elige tu Especialista <span class="text-studio-600">*</span>
+          </label>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {specialists.map((spec) => (
+              <label class="cursor-pointer border border-slate-200 rounded-2xl p-4 flex items-center gap-3 hover:border-studio-400 hover:bg-rose-50/30 transition-all has-[:checked]:border-studio-600 has-[:checked]:bg-studio-50/60 has-[:checked]:ring-2 has-[:checked]:ring-studio-500/20">
+                <input
+                  type="radio"
+                  name="specialist_id"
+                  value={spec.id}
+                  data-name={spec.full_name}
+                  class="accent-studio-600 w-4 h-4"
+                  required
+                />
+                <div class="min-w-0">
+                  <span class="block text-sm font-semibold text-slate-800 truncate">{spec.full_name}</span>
+                  <span class="block text-[11px] text-slate-500 truncate">{spec.bio || 'Manicurista Profesional'}</span>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <!-- PASO 3: FECHA Y HORA DISPONIBLE (CON BLOQUEO DE TRASLAPES) -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 bg-slate-50/80 p-5 rounded-2xl border border-slate-200/80">
+          <div>
+            <label for="appointment_day" class="block text-xs uppercase font-bold tracking-wider text-slate-700 mb-2">
+              3. Fecha de Cita <span class="text-studio-600">*</span>
+            </label>
+            <input
+              type="date"
+              id="appointment_day"
+              name="appointment_day"
+              min={today}
+              value={today}
+              required
+              class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-studio-500/40 text-sm font-medium bg-white"
+            />
+            <p class="text-[11px] text-slate-500 mt-1.5">Atención de Lunes a Sábado de 09:00 a 19:00.</p>
+          </div>
+
+          <div>
+            <label class="block text-xs uppercase font-bold tracking-wider text-slate-700 mb-2">
+              Horario Disponible <span class="text-studio-600">*</span>
+            </label>
+            <div id="slots-container" class="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 bg-white rounded-xl border border-slate-200">
+              <p class="col-span-3 text-xs text-slate-500 text-center py-4">
+                Selecciona servicio y especialista para cargar turnos libres...
+              </p>
+            </div>
+            <input type="hidden" id="selected_appointment_date" name="appointment_date" required />
+          </div>
+        </div>
+
+        <!-- PASO 4: DATOS DE LA CLIENTA -->
+        <div>
+          <label class="block text-xs uppercase font-bold tracking-wider text-slate-700 mb-3">
+            4. Tus Datos de Contacto
+          </label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label for="full_name" class="block text-xs font-semibold text-slate-600 mb-1">Nombre Completo *</label>
+              <input
+                type="text"
+                id="full_name"
+                name="full_name"
+                placeholder="Ej. Tannia Benalcázar"
+                required
+                class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-studio-500/40 text-sm"
+              />
+            </div>
+            <div>
+              <label for="whatsapp_phone" class="block text-xs font-semibold text-slate-600 mb-1">Teléfono WhatsApp *</label>
+              <input
+                type="tel"
+                id="whatsapp_phone"
+                name="whatsapp_phone"
+                placeholder="Ej. +593 99 123 4567"
+                required
+                class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-studio-500/40 text-sm"
+              />
+            </div>
+            <div class="sm:col-span-2">
+              <label for="notes" class="block text-xs font-semibold text-slate-600 mb-1">Nota o Diseño Especial (Opcional)</label>
+              <input
+                type="text"
+                id="notes"
+                name="notes"
+                placeholder="Ej. Traigo referencia de uñas francesas almendradas / Retiro de acrílico previo"
+                class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-studio-500/40 text-sm"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- Alerta de Error / Éxito -->
+        <div id="booking-alert" class="hidden p-4 rounded-xl text-sm font-medium"></div>
+
+        <!-- Botón Enviar -->
+        <div class="pt-4 border-t border-slate-100 flex items-center justify-between">
+          <div class="text-xs text-slate-500">
+            🔒 Confirmación instantánea y recordatorio vía WhatsApp.
+          </div>
+          <button
+            type="submit"
+            id="submit-btn"
+            class="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-studio-600 to-studio-500 text-white font-semibold text-sm shadow-soft-pink hover:shadow-xl hover:scale-[1.01] active:scale-95 transition-all flex items-center gap-2"
+          >
+            <span id="btn-text">Confirmar mi Reserva</span>
+            <span id="btn-spinner" class="hidden animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- Modal de Éxito -->
+  <div id="success-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 text-center shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+      <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
+        ✓
+      </div>
+      <h3 class="font-serif text-2xl font-bold text-slate-900">¡Cita Agendada con Éxito!</h3>
+      <p class="text-sm text-slate-600 mt-2" id="success-summary">
+        Te esperamos en el estudio para consentirte.
+      </p>
+
+      <div class="mt-6 p-4 rounded-2xl bg-rose-50/60 border border-rose-100 text-left text-xs space-y-1.5 text-slate-700">
+        <p><strong>Especialista:</strong> <span id="modal-spec"></span></p>
+        <p><strong>Servicio:</strong> <span id="modal-service"></span></p>
+        <p><strong>Fecha y Hora:</strong> <span id="modal-date"></span></p>
+      </div>
+
+      <div class="mt-6 flex flex-col gap-3">
+        <a
+          id="whatsapp-confirm-link"
+          href="#"
+          target="_blank"
+          class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors"
+        >
+          <span>Abrir Confirmación en WhatsApp</span>
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981z"/></svg>
+        </a>
+        <button
+          type="button"
+          onclick="closeModal()"
+          class="w-full py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-600 hover:bg-slate-50"
+        >
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script is:inline>
+    // Variables de estado del formulario
+    let selectedServiceId = '';
+    let selectedSpecialistId = '';
+    let selectedDate = '';
+    let occupiedSlots = [];
+
+    window.preselectService = function(id) {
+      const radio = document.querySelector(`input[name="service_id"][value="${id}"]`);
+      if (radio) {
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change'));
+        document.getElementById('agendar').scrollIntoView({ behavior: 'smooth' });
+      }
+    };
+
+    window.closeModal = function() {
+      document.getElementById('success-modal').classList.add('hidden');
+      window.location.reload();
+    };
+
+    // Horarios base de atención: 09:00 a 18:30 (intervalos de 30 minutos)
+    const baseHours = [
+      '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
+      '12:00', '12:30', '14:00', '14:30', '15:00', '15:30',
+      '16:00', '16:30', '17:00', '17:30', '18:00', '18:30'
+    ];
+
+    async function loadOccupiedSlots() {
+      const dateInput = document.getElementById('appointment_day');
+      const specialistInput = document.querySelector('input[name="specialist_id"]:checked');
+      const serviceInput = document.querySelector('input[name="service_id"]:checked');
+      const container = document.getElementById('slots-container');
+
+      if (!dateInput.value || !specialistInput) {
+        container.innerHTML = '<p class="col-span-3 text-xs text-slate-400 text-center py-4">Selecciona una manicurista y fecha</p>';
+        return;
+      }
+
+      container.innerHTML = '<p class="col-span-3 text-xs text-slate-500 text-center py-4 animate-pulse">Consultando disponibilidad...</p>';
+
+      try {
+        const res = await fetch(`/api/appointments?specialist_id=${specialistInput.value}&date=${dateInput.value}`);
+        const data = await res.json();
+        
+        occupiedSlots = data.appointments || [];
+        renderSlots();
+      } catch (err) {
+        container.innerHTML = '<p class="col-span-3 text-xs text-rose-500 text-center py-4">Error al consultar turnos</p>';
+      }
+    }
+
+    function renderSlots() {
+      const container = document.getElementById('slots-container');
+      const dateInput = document.getElementById('appointment_day');
+      const serviceInput = document.querySelector('input[name="service_id"]:checked');
+      const serviceDuration = serviceInput ? parseInt(serviceInput.dataset.duration || '60') : 60;
+
+      container.innerHTML = '';
+
+      baseHours.forEach(time => {
+        const slotIso = `${dateInput.value}T${time}:00`;
+        const slotStart = new Date(slotIso).getTime();
+        const slotEnd = slotStart + serviceDuration * 60000;
+
+        // Comprobar conflicto con citas existentes
+        const isTaken = occupiedSlots.some(app => {
+          const appStart = new Date(app.appointment_date).getTime();
+          const appDuration = (app.services?.duration_minutes || 60) * 60000;
+          const appEnd = appStart + appDuration;
+          return slotStart < appEnd && slotEnd > appStart;
+        });
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = isTaken
+          ? 'py-2 px-1 text-xs rounded-lg font-medium bg-slate-100 text-slate-400 cursor-not-allowed border border-dashed border-slate-200 line-through'
+          : 'slot-btn py-2 px-1 text-xs rounded-lg font-medium border border-slate-200 hover:border-studio-500 hover:bg-studio-50 text-slate-700 transition-all';
+        
+        btn.textContent = time;
+        btn.disabled = isTaken;
+
+        if (!isTaken) {
+          btn.onclick = () => {
+            document.querySelectorAll('.slot-btn').forEach(b => {
+              b.classList.remove('bg-studio-600', 'text-white', 'border-studio-600');
+              b.classList.add('border-slate-200', 'text-slate-700');
+            });
+            btn.classList.add('bg-studio-600', 'text-white', 'border-studio-600');
+            btn.classList.remove('text-slate-700');
+            document.getElementById('selected_appointment_date').value = `${dateInput.value}T${time}:00`;
+          };
+        }
+
+        container.appendChild(btn);
+      });
+    }
+
+    // Escuchar cambios
+    document.querySelectorAll('input[name="service_id"]').forEach(el => el.addEventListener('change', loadOccupiedSlots));
+    document.querySelectorAll('input[name="specialist_id"]').forEach(el => el.addEventListener('change', loadOccupiedSlots));
+    document.getElementById('appointment_day').addEventListener('change', loadOccupiedSlots);
+
+    // Enviar formulario
+    const form = document.getElementById('booking-form');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const alertBox = document.getElementById('booking-alert');
+      const submitBtn = document.getElementById('submit-btn');
+      const btnText = document.getElementById('btn-text');
+      const btnSpinner = document.getElementById('btn-spinner');
+
+      const appointmentDate = document.getElementById('selected_appointment_date').value;
+      if (!appointmentDate) {
+        alertBox.className = 'p-4 rounded-xl text-sm font-medium bg-rose-100 text-rose-800 block';
+        alertBox.textContent = 'Por favor selecciona un horario disponible de la lista.';
+        return;
+      }
+
+      alertBox.className = 'hidden';
+      submitBtn.disabled = true;
+      btnSpinner.classList.remove('hidden');
+      btnText.textContent = 'Procesando reserva...';
+
+      const formData = {
+        full_name: document.getElementById('full_name').value.trim(),
+        whatsapp_phone: document.getElementById('whatsapp_phone').value.trim(),
+        service_id: document.querySelector('input[name="service_id"]:checked')?.value,
+        specialist_id: document.querySelector('input[name="specialist_id"]:checked')?.value,
+        appointment_date: appointmentDate,
+        notes: document.getElementById('notes').value.trim()
+      };
+
+      try {
+        const res = await fetch('/api/appointments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData)
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || 'Ocurrió un error al agendar.');
+        }
+
+        // Mostrar Modal de Éxito
+        const modal = document.getElementById('success-modal');
+        const specName = document.querySelector('input[name="specialist_id"]:checked')?.dataset.name || '';
+        const servName = document.querySelector('input[name="service_id"]:checked')?.dataset.name || '';
+        
+        document.getElementById('modal-spec').textContent = specName;
+        document.getElementById('modal-service').textContent = servName;
+        document.getElementById('modal-date').textContent = new Date(formData.appointment_date).toLocaleString('es-EC', { dateStyle: 'full', timeStyle: 'short' });
+
+        const cleanPhone = formData.whatsapp_phone.replace(/[^0-9]/g, '');
+        const waMsg = `¡Hola Darshall Estudio! Acabo de reservar mi cita para ${servName} con ${specName} el día ${formData.appointment_date}. Mi nombre es ${formData.full_name}.`;
+        document.getElementById('whatsapp-confirm-link').href = `https://wa.me/593991234567?text=${encodeURIComponent(waMsg)}`;
+
+        modal.classList.remove('hidden');
+      } catch (err) {
+        alertBox.className = 'p-4 rounded-xl text-sm font-medium bg-rose-100 text-rose-800 block';
+        alertBox.textContent = err.message;
+      } finally {
+        submitBtn.disabled = false;
+        btnSpinner.classList.add('hidden');
+        btnText.textContent = 'Confirmar mi Reserva';
+      }
+    });
+  </script>
+</Layout>

@@ -1,0 +1,283 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { supabaseAdmin } from '../../lib/supabase';
+import type { ReminderCandidate } from '../../types/database';
+
+export const prerender = false;
+
+const now = new Date();
+const siteUrl = process.env.PUBLIC_SITE_URL || 'https://darshall-estudio.vercel.app';
+const studioName = process.env.PUBLIC_STUDIO_NAME || 'Darshall Estudio';
+
+// Ventana de 3 semanas: Citas completadas entre hace 19 y 23 días
+const daysTarget = 21;
+const dateStart = new Date(now.getTime() - (daysTarget + 2) * 24 * 60 * 60 * 1000).toISOString();
+const dateEnd = new Date(now.getTime() - (daysTarget - 2) * 24 * 60 * 60 * 1000).toISOString();
+
+// 1. Obtener citas completadas en esa ventana
+const { data: pastAppointments, error } = await supabaseAdmin
+  .from('appointments')
+  .select(`
+    id,
+    appointment_date,
+    status,
+    client_id,
+    clients ( id, full_name, whatsapp_phone ),
+    services ( name ),
+    specialists ( full_name )
+  `)
+  .eq('status', 'completed')
+  .gte('appointment_date', dateStart)
+  .lte('appointment_date', dateEnd)
+  .order('appointment_date', { ascending: false });
+
+const candidates: ReminderCandidate[] = [];
+const alreadyRetainedClients: Array<{ name: string; phone: string; nextDate: string }> = [];
+
+for (const app of (pastAppointments as any[] || [])) {
+  const client = app.clients;
+  if (!client || !client.whatsapp_phone) continue;
+
+  // 2. CONDICIÓN CLAVE: Verificar si la clienta ya tiene una cita futura agendada
+  const { data: futureApps } = await supabaseAdmin
+    .from('appointments')
+    .select('id, appointment_date')
+    .eq('client_id', client.id)
+    .gt('appointment_date', now.toISOString())
+    .in('status', ['scheduled', 'in_progress'])
+    .order('appointment_date', { ascending: true })
+    .limit(1);
+
+  if (futureApps && futureApps.length > 0) {
+    alreadyRetainedClients.push({
+      name: client.full_name,
+      phone: client.whatsapp_phone,
+      nextDate: futureApps[0].appointment_date
+    });
+    continue; // OMITIR: Ya tiene cita futura
+  }
+
+  // Verificar si ya se le envió recordatorio previamente por esta cita
+  const { data: existingLog } = await supabaseAdmin
+    .from('reminder_logs')
+    .select('id, sent_at')
+    .eq('appointment_id', app.id)
+    .maybeSingle();
+
+  const appDate = new Date(app.appointment_date);
+  const diffDays = Math.round((now.getTime() - appDate.getTime()) / (1000 * 3600 * 24));
+
+  const messageText = `Hola ${client.full_name}, se cumplen 3 semanas desde tu último servicio de uñas en ${studioName}. ¡Es momento de tu mantenimiento para mantener tus uñas sanas e impecables! Agenda tu espacio aquí: ${siteUrl}/#agendar`;
+  const cleanPhone = client.whatsapp_phone.replace(/[^0-9]/g, '');
+  const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(messageText)}`;
+
+  candidates.push({
+    appointment_id: app.id,
+    client_id: client.id,
+    client_name: client.full_name,
+    whatsapp_phone: client.whatsapp_phone,
+    service_name: app.services?.name || 'Servicio de Uñas',
+    specialist_name: app.specialists?.full_name || 'Especialista',
+    completion_date: app.appointment_date,
+    days_since: diffDays,
+    has_future_appointment: false,
+    whatsapp_url: whatsappUrl,
+    message_text: messageText,
+    already_notified: Boolean(existingLog)
+  });
+}
+---
+
+<AdminLayout title="Motor de Recordatorios WhatsApp (3 Semanas)" activeTab="recordatorios">
+  <!-- Banner Informativo de Lógica -->
+  <div class="bg-gradient-to-r from-emerald-50 via-teal-50 to-white p-6 rounded-2xl border border-emerald-200/80 shadow-sm mb-8">
+    <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 uppercase tracking-wide">
+          Algoritmo de Retención Activo
+        </span>
+        <h2 class="font-serif text-xl font-bold text-slate-900 mt-1">Recordatorio Preventivo de Mantenimiento</h2>
+        <p class="text-xs text-slate-600 max-w-2xl mt-1">
+          Filtra citas completadas hace exactamente 21 días (3 semanas). Si la clienta <strong>ya tiene una cita agendada en el futuro</strong>, el sistema la descarta automáticamente para no causarle molestias.
+        </p>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button
+          type="button"
+          onclick="window.location.reload()"
+          class="px-4 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-sm transition-all"
+        >
+          🔄 Actualizar Lista
+        </button>
+        <button
+          type="button"
+          onclick="triggerAutomatedCron()"
+          class="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all"
+        >
+          ⚡ Ejecutar Escaneo Cron
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Métricas Rápidas -->
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-8">
+    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+      <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Clientas Para Recordatorio</span>
+      <span class="font-serif text-3xl font-bold text-rose-600 block mt-1">{candidates.length}</span>
+      <span class="text-[11px] text-slate-500 mt-1 block">Sin cita futura agendada</span>
+    </div>
+
+    <div class="bg-white p-5 rounded-2xl border border-emerald-100 shadow-sm">
+      <span class="text-xs font-semibold uppercase tracking-wider text-emerald-700">Retenidas Previamente</span>
+      <span class="font-serif text-3xl font-bold text-emerald-600 block mt-1">{alreadyRetainedClients.length}</span>
+      <span class="text-[11px] text-emerald-600 mt-1 block">Ya agendaron su mantenimiento ✓</span>
+    </div>
+
+    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+      <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Auditadas</span>
+      <span class="font-serif text-3xl font-bold text-slate-800 block mt-1">
+        {candidates.length + alreadyRetainedClients.length}
+      </span>
+      <span class="text-[11px] text-slate-400 mt-1 block">Ventana 19-23 días atrás</span>
+    </div>
+  </div>
+
+  <!-- Tabla de Clientas a Notificar -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-8">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-serif text-lg font-bold text-slate-900">
+        Clientas Pendientes de Recordatorio (Mantenimiento 3 Semanas)
+      </h3>
+      <span class="text-xs text-slate-500">Un clic para abrir WhatsApp con plantilla personalizada</span>
+    </div>
+
+    {candidates.length === 0 ? (
+      <div class="text-center py-12 border border-dashed border-slate-200 rounded-2xl">
+        <span class="text-3xl">✨</span>
+        <h4 class="font-serif font-bold text-slate-800 mt-2">¡Todo al día!</h4>
+        <p class="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+          No hay clientas pendientes de recordatorio en este momento o todas las de hace 3 semanas ya tienen cita agendada.
+        </p>
+      </div>
+    ) : (
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="border-b border-slate-100 uppercase tracking-wider text-slate-400 font-semibold">
+              <th class="pb-3">Clienta</th>
+              <th class="pb-3">Último Servicio</th>
+              <th class="pb-3">Manicurista</th>
+              <th class="pb-3 text-center">Días Transcurridos</th>
+              <th class="pb-3 text-center">Estado Notificación</th>
+              <th class="pb-3 text-right">Acción WhatsApp</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {candidates.map((c) => {
+              const formattedDate = new Date(c.completion_date).toLocaleDateString('es-EC', { dateStyle: 'medium' });
+              return (
+                <tr class="hover:bg-slate-50/80 transition-colors">
+                  <td class="py-3.5">
+                    <span class="block font-bold text-slate-900 text-sm">{c.client_name}</span>
+                    <span class="block text-slate-400 text-[11px]">{c.whatsapp_phone}</span>
+                  </td>
+                  <td class="py-3.5">
+                    <span class="font-medium text-studio-700">{c.service_name}</span>
+                    <span class="block text-slate-400 text-[11px]">{formattedDate}</span>
+                  </td>
+                  <td class="py-3.5 text-slate-700">{c.specialist_name}</td>
+                  <td class="py-3.5 text-center">
+                    <span class="px-2.5 py-1 rounded-full font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                      Hace {c.days_since} días
+                    </span>
+                  </td>
+                  <td class="py-3.5 text-center">
+                    {c.already_notified ? (
+                      <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">
+                        Ya Notificada ✓
+                      </span>
+                    ) : (
+                      <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700">
+                        Pendiente
+                      </span>
+                    )}
+                  </td>
+                  <td class="py-3.5 text-right">
+                    <a
+                      href={c.whatsapp_url}
+                      target="_blank"
+                      onclick={`markAsSent('${c.appointment_id}', '${c.client_id}', '${c.whatsapp_phone}', \`${c.message_text.replace(/`/g, '')}\`)`}
+                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm transition-transform active:scale-95"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981z"/></svg>
+                      <span>Enviar WhatsApp</span>
+                    </a>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+
+  <!-- Resumen de Clientas que Ya Agendaron (Omitidas con Éxito) -->
+  {alreadyRetainedClients.length > 0 && (
+    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+      <h3 class="font-serif text-base font-bold text-emerald-800 flex items-center gap-2 mb-3">
+        <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+        Clientas con Cita Futura Confirmada (Excluidas de Recordatorio)
+      </h3>
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+        {alreadyRetainedClients.map((client) => {
+          const nextDateStr = new Date(client.nextDate).toLocaleDateString('es-EC', { dateStyle: 'medium' });
+          return (
+            <div class="p-3 rounded-xl bg-emerald-50/50 border border-emerald-100 text-xs">
+              <span class="font-bold text-slate-800 block">{client.name}</span>
+              <span class="text-slate-500 block text-[11px]">{client.phone}</span>
+              <span class="text-emerald-700 font-semibold block mt-1">Próxima cita: {nextDateStr} ✓</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  )}
+
+  <script is:inline>
+    async function markAsSent(appointmentId, clientId, phone, messageText) {
+      try {
+        await fetch('/api/cron/reminders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mark_sent: true,
+            appointment_id: appointmentId,
+            client_id: clientId,
+            phone: phone,
+            message_text: messageText
+          })
+        });
+      } catch (e) {
+        console.error('Error al registrar recordatorio:', e);
+      }
+    }
+
+    async function triggerAutomatedCron() {
+      const btn = event.target;
+      btn.textContent = 'Ejecutando...';
+      try {
+        const res = await fetch('/api/cron/reminders?manual=true');
+        const data = await res.json();
+        alert(`Escaneo completado exitosamente.\nTotal analizadas: ${data.total_examined}\nCandidatas a recordar: ${data.candidates_to_remind}\nOmitidas por ya tener cita futura: ${data.skipped_already_booked}`);
+        window.location.reload();
+      } catch (err) {
+        alert('Error en ejecución: ' + err.message);
+      } finally {
+        btn.textContent = '⚡ Ejecutar Escaneo Cron';
+      }
+    }
+  </script>
+</AdminLayout>

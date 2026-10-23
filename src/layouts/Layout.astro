@@ -1,0 +1,75 @@
+---
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description = 'Estudio de Belleza Especializado en Uñas de Alta Gama' } = Astro.props;
+---
+
+<!doctype html>
+<html lang="es" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="description" content={description} />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{title} | Darshall Estudio</title>
+    <!-- Google Fonts: Playfair Display & Plus Jakarta Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-[#FAF7F5] text-slate-800 font-sans antialiased min-h-screen flex flex-col selection:bg-studio-200 selection:text-studio-900">
+    <!-- Header Boutique -->
+    <header class="sticky top-0 z-50 backdrop-blur-md bg-white/80 border-b border-rose-100/60 transition-all duration-300">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+        <a href="/" class="group flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full bg-gradient-to-tr from-studio-500 via-rose-300 to-amber-200 flex items-center justify-center text-white font-serif font-bold text-xl shadow-md group-hover:scale-105 transition-transform">
+            D
+          </div>
+          <div>
+            <span class="block font-serif text-2xl tracking-wider font-semibold text-slate-900 group-hover:text-studio-600 transition-colors">
+              DARSHALL
+            </span>
+            <span class="block text-[10px] tracking-[0.25em] text-studio-500 uppercase font-medium">
+              Nails & Beauty Studio
+            </span>
+          </div>
+        </a>
+
+        <nav class="flex items-center gap-4 sm:gap-6">
+          <a href="/#servicios" class="text-sm font-medium text-slate-600 hover:text-studio-600 transition-colors">
+            Servicios
+          </a>
+          <a href="/admin/agenda" class="text-xs uppercase tracking-wider font-semibold px-3 py-1.5 rounded-full border border-slate-200 hover:border-studio-300 text-slate-600 hover:text-studio-600 transition-all">
+            Portal Admin
+          </a>
+          <a href="/#agendar" class="inline-flex items-center justify-center px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider bg-gradient-to-r from-studio-600 to-studio-500 text-white shadow-soft-pink hover:shadow-lg hover:brightness-105 active:scale-95 transition-all">
+            Reservar Cita
+          </a>
+        </nav>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow">
+      <slot />
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-rose-100 mt-20">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 flex flex-col md:flex-row items-center justify-between gap-6 text-xs text-slate-500">
+        <div class="flex items-center gap-2">
+          <span class="font-serif font-bold text-sm tracking-wide text-slate-800">DARSHALL ESTUDIO</span>
+          <span>© {new Date().getFullYear()} — Elegancia y Cuidado en Cada Detalle.</span>
+        </div>
+        <div class="flex items-center gap-6">
+          <a href="/admin/agenda" class="hover:text-studio-600 underline-offset-4 hover:underline">Agenda</a>
+          <a href="/admin/productividad" class="hover:text-studio-600 underline-offset-4 hover:underline">Productividad</a>
+          <a href="/admin/recordatorios" class="hover:text-studio-600 underline-offset-4 hover:underline">Recordatorios WhatsApp</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

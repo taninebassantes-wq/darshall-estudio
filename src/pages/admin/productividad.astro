@@ -1,0 +1,246 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { supabaseAdmin } from '../../lib/supabase';
+import { formatCurrency } from '../../lib/date-utils';
+import type { ProductivityLog, Specialist } from '../../types/database';
+
+export const prerender = false;
+
+const url = new URL(Astro.request.url);
+const specialistFilter = url.searchParams.get('specialist_id') || 'all';
+const timeframe = url.searchParams.get('timeframe') || 'month'; // 'today', 'week', 'month', 'all'
+
+// Cálculo de fechas según timeframe
+const now = new Date();
+let startDate = new Date();
+
+if (timeframe === 'today') {
+  startDate.setHours(0, 0, 0, 0);
+} else if (timeframe === 'week') {
+  startDate.setDate(now.getDate() - 7);
+} else if (timeframe === 'month') {
+  startDate.setDate(1); // Primer día del mes
+  startDate.setHours(0, 0, 0, 0);
+} else {
+  startDate = new Date('2020-01-01');
+}
+
+// Cargar especialistas
+const { data: rawSpecialists } = await supabaseAdmin
+  .from('specialists')
+  .select('*')
+  .order('full_name');
+const specialists: Specialist[] = rawSpecialists || [];
+
+// Consulta de logs de productividad
+let query = supabaseAdmin
+  .from('productivity_logs')
+  .select(`
+    id,
+    appointment_id,
+    specialist_id,
+    service_amount,
+    commission_rate,
+    commission_earned,
+    logged_at,
+    specialists ( id, full_name, commission_rate ),
+    appointments (
+      id,
+      appointment_date,
+      clients ( full_name, whatsapp_phone ),
+      services ( name )
+    )
+  `)
+  .gte('logged_at', startDate.toISOString())
+  .order('logged_at', { ascending: false });
+
+if (specialistFilter !== 'all') {
+  query = query.eq('specialist_id', specialistFilter);
+}
+
+const { data: logsRaw, error } = await query;
+const logs: any[] = logsRaw || [];
+
+// Cálculos globales
+const totalRevenue = logs.reduce((sum, item) => sum + Number(item.service_amount), 0);
+const totalCommissions = logs.reduce((sum, item) => sum + Number(item.commission_earned), 0);
+const studioNetProfit = totalRevenue - totalCommissions;
+const totalServices = logs.length;
+
+// Agrupación por especialista para la tabla resumen
+const specialistSummaryMap = new Map<string, {
+  name: string;
+  count: number;
+  revenue: number;
+  commission: number;
+  rate: number;
+}>();
+
+logs.forEach(log => {
+  const spec = log.specialists;
+  const specId = log.specialist_id;
+  const current = specialistSummaryMap.get(specId) || {
+    name: spec?.full_name || 'Especialista',
+    count: 0,
+    revenue: 0,
+    commission: 0,
+    rate: Number(log.commission_rate) * 100
+  };
+
+  current.count += 1;
+  current.revenue += Number(log.service_amount);
+  current.commission += Number(log.commission_earned);
+  specialistSummaryMap.set(specId, current);
+});
+
+const specialistSummaries = Array.from(specialistSummaryMap.values());
+---
+
+<AdminLayout title="Productividad y Liquidación de Comisiones" activeTab="productividad">
+  <!-- Filtros -->
+  <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm mb-8 flex flex-col md:flex-row items-center justify-between gap-4">
+    <form method="GET" class="flex flex-wrap items-center gap-3">
+      <div>
+        <label for="timeframe" class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Período</label>
+        <select
+          id="timeframe"
+          name="timeframe"
+          onchange="this.form.submit()"
+          class="px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-medium focus:ring-2 focus:ring-studio-500/20 focus:outline-none"
+        >
+          <option value="today" selected={timeframe === 'today'}>Hoy</option>
+          <option value="week" selected={timeframe === 'week'}>Últimos 7 días</option>
+          <option value="month" selected={timeframe === 'month'}>Este Mes</option>
+          <option value="all" selected={timeframe === 'all'}>Histórico Completo</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="specialist_id" class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Filtrar Especialista</label>
+        <select
+          id="specialist_id"
+          name="specialist_id"
+          onchange="this.form.submit()"
+          class="px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-medium focus:ring-2 focus:ring-studio-500/20 focus:outline-none min-w-[200px]"
+        >
+          <option value="all" selected={specialistFilter === 'all'}>Todas las Especialistas</option>
+          {specialists.map((s) => (
+            <option value={s.id} selected={specialistFilter === s.id}>
+              {s.full_name} ({Number(s.commission_rate) * 100}% com.)
+            </option>
+          ))}
+        </select>
+      </div>
+    </form>
+
+    <div class="text-xs text-slate-500">
+      * Los registros se alimentan automáticamente cuando una cita pasa a <strong class="text-emerald-700">Completada</strong>.
+    </div>
+  </div>
+
+  <!-- Métricas KPI Cards -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+    <div class="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm">
+      <span class="block text-xs font-semibold uppercase tracking-wider text-slate-500">Servicios Realizados</span>
+      <span class="font-serif text-3xl font-bold text-slate-900 mt-2 block">{totalServices}</span>
+      <span class="text-[11px] text-slate-400 mt-1 block">Atenciones registradas</span>
+    </div>
+
+    <div class="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm">
+      <span class="block text-xs font-semibold uppercase tracking-wider text-slate-500">Facturación Bruta</span>
+      <span class="font-serif text-3xl font-bold text-slate-900 mt-2 block">{formatCurrency(totalRevenue)}</span>
+      <span class="text-[11px] text-emerald-600 mt-1 block font-medium">Ingreso total en caja</span>
+    </div>
+
+    <div class="bg-white p-6 rounded-2xl border border-rose-100 shadow-sm bg-gradient-to-br from-white to-rose-50/30">
+      <span class="block text-xs font-semibold uppercase tracking-wider text-studio-700">Comisiones a Liquidar</span>
+      <span class="font-serif text-3xl font-bold text-studio-600 mt-2 block">{formatCurrency(totalCommissions)}</span>
+      <span class="text-[11px] text-studio-500 mt-1 block font-medium">Pago acumulado a manicuristas</span>
+    </div>
+
+    <div class="bg-white p-6 rounded-2xl border border-amber-200/80 shadow-sm bg-gradient-to-br from-white to-amber-50/20">
+      <span class="block text-xs font-semibold uppercase tracking-wider text-amber-800">Margen Estudio (Neto)</span>
+      <span class="font-serif text-3xl font-bold text-amber-700 mt-2 block">{formatCurrency(studioNetProfit)}</span>
+      <span class="text-[11px] text-amber-600 mt-1 block font-medium">Retención para insumos y estudio</span>
+    </div>
+  </div>
+
+  <!-- Resumen de Liquidación por Especialista -->
+  <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 mb-8">
+    <h3 class="font-serif text-lg font-bold text-slate-900 mb-4">Liquidación por Manicurista</h3>
+    {specialistSummaries.length === 0 ? (
+      <p class="text-xs text-slate-500 py-4">No hay servicios completados en el período seleccionado.</p>
+    ) : (
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead>
+            <tr class="border-b border-slate-100 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <th class="pb-3">Especialista</th>
+              <th class="pb-3 text-center">Servicios</th>
+              <th class="pb-3 text-right">Facturado Bruto</th>
+              <th class="pb-3 text-center">% Comisión</th>
+              <th class="pb-3 text-right">Comisión a Pagar</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {specialistSummaries.map((s) => (
+              <tr class="hover:bg-slate-50/80 transition-colors">
+                <td class="py-3.5 font-semibold text-slate-800">{s.name}</td>
+                <td class="py-3.5 text-center font-medium">{s.count}</td>
+                <td class="py-3.5 text-right font-medium text-slate-700">{formatCurrency(s.revenue)}</td>
+                <td class="py-3.5 text-center">
+                  <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-50 text-studio-700 border border-rose-200">
+                    {s.rate}%
+                  </span>
+                </td>
+                <td class="py-3.5 text-right font-bold text-emerald-600">{formatCurrency(s.commission)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+
+  <!-- Detalle Cronológico de Trabajos -->
+  <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+    <h3 class="font-serif text-lg font-bold text-slate-900 mb-4">Detalle Individual de Servicios Completados</h3>
+    {logs.length === 0 ? (
+      <p class="text-xs text-slate-500 py-4">No hay registros de productividad todavía.</p>
+    ) : (
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="border-b border-slate-100 uppercase tracking-wider text-slate-400 font-semibold">
+              <th class="pb-3">Fecha y Hora</th>
+              <th class="pb-3">Clienta</th>
+              <th class="pb-3">Servicio</th>
+              <th class="pb-3">Manicurista</th>
+              <th class="pb-3 text-right">Precio</th>
+              <th class="pb-3 text-right">Comisión</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 text-slate-700">
+            {logs.map((log) => {
+              const app = log.appointments;
+              const dateStr = new Date(log.logged_at).toLocaleString('es-EC', { dateStyle: 'short', timeStyle: 'short' });
+              return (
+                <tr class="hover:bg-slate-50/80">
+                  <td class="py-3 text-slate-500">{dateStr}</td>
+                  <td class="py-3 font-semibold text-slate-900">{app?.clients?.full_name || 'Clienta'}</td>
+                  <td class="py-3 text-studio-700 font-medium">{app?.services?.name || 'Servicio'}</td>
+                  <td class="py-3">{log.specialists?.full_name}</td>
+                  <td class="py-3 text-right font-medium">{formatCurrency(Number(log.service_amount))}</td>
+                  <td class="py-3 text-right font-bold text-emerald-600">
+                    {formatCurrency(Number(log.commission_earned))} 
+                    <span class="text-[10px] text-slate-400 font-normal">({Number(log.commission_rate) * 100}%)</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+</AdminLayout>
