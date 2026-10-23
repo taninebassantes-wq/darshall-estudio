@@ -25,41 +25,48 @@ if (timeframe === 'today') {
   startDate = new Date('2020-01-01');
 }
 
-// Cargar especialistas
-const { data: rawSpecialists } = await supabaseAdmin
-  .from('specialists')
-  .select('*')
-  .order('full_name');
-const specialists: Specialist[] = rawSpecialists || [];
+let specialists: Specialist[] = [];
+let logs: any[] = [];
 
-// Consulta de logs de productividad
-let query = supabaseAdmin
-  .from('productivity_logs')
-  .select(`
-    id,
-    appointment_id,
-    specialist_id,
-    service_amount,
-    commission_rate,
-    commission_earned,
-    logged_at,
-    specialists ( id, full_name, commission_rate ),
-    appointments (
+try {
+  // Cargar especialistas
+  const { data: rawSpecialists } = await supabaseAdmin
+    .from('specialists')
+    .select('*')
+    .order('full_name');
+  specialists = rawSpecialists || [];
+
+  // Consulta de logs de productividad
+  let query = supabaseAdmin
+    .from('productivity_logs')
+    .select(`
       id,
-      appointment_date,
-      clients ( full_name, whatsapp_phone ),
-      services ( name )
-    )
-  `)
-  .gte('logged_at', startDate.toISOString())
-  .order('logged_at', { ascending: false });
+      appointment_id,
+      specialist_id,
+      service_amount,
+      commission_rate,
+      commission_earned,
+      logged_at,
+      specialists ( id, full_name, commission_rate ),
+      appointments (
+        id,
+        appointment_date,
+        clients ( full_name, whatsapp_phone ),
+        services ( name )
+      )
+    `)
+    .gte('logged_at', startDate.toISOString())
+    .order('logged_at', { ascending: false });
 
-if (specialistFilter !== 'all') {
-  query = query.eq('specialist_id', specialistFilter);
+  if (specialistFilter !== 'all') {
+    query = query.eq('specialist_id', specialistFilter);
+  }
+
+  const { data: logsRaw } = await query;
+  logs = logsRaw || [];
+} catch (e) {
+  console.error('Error al cargar productividad:', e);
 }
-
-const { data: logsRaw, error } = await query;
-const logs: any[] = logsRaw || [];
 
 // Cálculos globales
 const totalRevenue = logs.reduce((sum, item) => sum + Number(item.service_amount), 0);

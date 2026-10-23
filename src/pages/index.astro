@@ -5,21 +5,28 @@ import type { Service, Specialist } from '../types/database';
 
 export const prerender = false;
 
-// Cargar catálogo de servicios y especialistas activos desde Supabase
-const { data: rawServices } = await supabase
-  .from('services')
-  .select('*')
-  .eq('is_active', true)
-  .order('price', { ascending: true });
+// Cargar catálogo de servicios y especialistas activos desde Supabase con manejo de errores
+let services: Service[] = [];
+let specialists: Specialist[] = [];
 
-const { data: rawSpecialists } = await supabase
-  .from('specialists')
-  .select('*')
-  .eq('is_active', true)
-  .order('full_name', { ascending: true });
+try {
+  const { data: rawServices } = await supabase
+    .from('services')
+    .select('*')
+    .eq('is_active', true)
+    .order('price', { ascending: true });
 
-const services: Service[] = rawServices || [];
-const specialists: Specialist[] = rawSpecialists || [];
+  const { data: rawSpecialists } = await supabase
+    .from('specialists')
+    .select('*')
+    .eq('is_active', true)
+    .order('full_name', { ascending: true });
+
+  services = rawServices || [];
+  specialists = rawSpecialists || [];
+} catch (e) {
+  console.error('Error al cargar datos en index.astro:', e);
+}
 
 // Fecha de hoy formateada como YYYY-MM-DD para el datepicker
 const today = new Date().toISOString().split('T')[0];

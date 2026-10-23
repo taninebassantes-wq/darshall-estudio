@@ -11,42 +11,49 @@ const url = new URL(Astro.request.url);
 const selectedSpecialistId = url.searchParams.get('specialist_id') || 'all';
 const selectedDate = url.searchParams.get('date') || new Date().toISOString().split('T')[0];
 
-// Cargar todas las manicuristas para el filtro
-const { data: rawSpecialists } = await supabaseAdmin
-  .from('specialists')
-  .select('*')
-  .order('full_name');
+let specialists: Specialist[] = [];
+let appointments: any[] = [];
 
-const specialists: Specialist[] = rawSpecialists || [];
+try {
+  // Cargar todas las manicuristas para el filtro
+  const { data: rawSpecialists } = await supabaseAdmin
+    .from('specialists')
+    .select('*')
+    .order('full_name');
 
-// Construcción de la consulta de citas para la fecha seleccionada
-const startOfDay = `${selectedDate}T00:00:00.000Z`;
-const endOfDay = `${selectedDate}T23:59:59.999Z`;
+  specialists = rawSpecialists || [];
 
-let query = supabaseAdmin
-  .from('appointments')
-  .select(`
-    id,
-    appointment_date,
-    status,
-    notes,
-    client_id,
-    specialist_id,
-    service_id,
-    clients ( id, full_name, whatsapp_phone ),
-    specialists ( id, full_name, commission_rate ),
-    services ( id, name, price, duration_minutes )
-  `)
-  .gte('appointment_date', startOfDay)
-  .lte('appointment_date', endOfDay)
-  .order('appointment_date', { ascending: true });
+  // Construcción de la consulta de citas para la fecha seleccionada
+  const startOfDay = `${selectedDate}T00:00:00.000Z`;
+  const endOfDay = `${selectedDate}T23:59:59.999Z`;
 
-if (selectedSpecialistId !== 'all') {
-  query = query.eq('specialist_id', selectedSpecialistId);
+  let query = supabaseAdmin
+    .from('appointments')
+    .select(`
+      id,
+      appointment_date,
+      status,
+      notes,
+      client_id,
+      specialist_id,
+      service_id,
+      clients ( id, full_name, whatsapp_phone ),
+      specialists ( id, full_name, commission_rate ),
+      services ( id, name, price, duration_minutes )
+    `)
+    .gte('appointment_date', startOfDay)
+    .lte('appointment_date', endOfDay)
+    .order('appointment_date', { ascending: true });
+
+  if (selectedSpecialistId !== 'all') {
+    query = query.eq('specialist_id', selectedSpecialistId);
+  }
+
+  const { data: appointmentsRaw } = await query;
+  appointments = appointmentsRaw || [];
+} catch (e) {
+  console.error('Error al cargar agenda:', e);
 }
-
-const { data: appointmentsRaw, error } = await query;
-const appointments = (appointmentsRaw as any[] || []);
 
 // Resumen del día
 const totalAppointments = appointments.length;
