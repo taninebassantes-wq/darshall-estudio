@@ -169,13 +169,20 @@ const scheduledCount = appointments.filter(a => a.status === 'scheduled').length
                 <div class="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1.5">
                   <span>👩‍🎨 Especialista: <strong class="text-slate-700">{specialist?.full_name}</strong></span>
                   <span>•</span>
-                  <a
-                    href={`https://wa.me/${client?.whatsapp_phone?.replace(/[^0-9]/g, '')}`}
-                    target="_blank"
-                    class="text-emerald-600 hover:underline flex items-center gap-1 font-medium"
-                  >
-                    💬 {client?.whatsapp_phone}
-                  </a>
+                  {(() => {
+                    let cPhone = client?.whatsapp_phone?.replace(/[^0-9]/g, '') || '';
+                    if (cPhone.startsWith('09') && cPhone.length === 10) cPhone = '593' + cPhone.substring(1);
+                    return (
+                      <a
+                        href={`https://api.whatsapp.com/send?phone=${cPhone}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-emerald-600 hover:underline flex items-center gap-1 font-medium"
+                      >
+                        💬 +{cPhone}
+                      </a>
+                    );
+                  })()}
                   {app.notes && (
                     <>
                       <span>•</span>

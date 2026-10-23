@@ -6,14 +6,12 @@ import type { ReminderCandidate } from '../../types/database';
 export const prerender = false;
 
 const url = new URL(Astro.request.url);
-// Por defecto en 'test' para que durante las pruebas se vean inmediatamente las clientas atendidas hoy
 const mode = url.searchParams.get('mode') || 'test'; 
 
 const now = new Date();
 const siteUrl = process.env.PUBLIC_SITE_URL || 'https://darshall-estudio.vercel.app';
 const studioName = process.env.PUBLIC_STUDIO_NAME || 'Darshall Estudio';
 
-// Ventana de 3 semanas para modo estricto
 const daysTarget = 21;
 const dateStartStrict = new Date(now.getTime() - (daysTarget + 2) * 24 * 60 * 60 * 1000).toISOString();
 const dateEndStrict = new Date(now.getTime() - (daysTarget - 2) * 24 * 60 * 60 * 1000).toISOString();
@@ -22,7 +20,6 @@ const candidates: ReminderCandidate[] = [];
 const alreadyRetainedClients: Array<{ name: string; phone: string; nextDate: string }> = [];
 
 try {
-  // Construir consulta según el modo
   let query = supabaseAdmin
     .from('appointments')
     .select(`
@@ -37,7 +34,6 @@ try {
     .eq('status', 'completed')
     .order('appointment_date', { ascending: false });
 
-  // Si está en modo estricto de producción, filtrar a ~21 días
   if (mode === 'production') {
     query = query.gte('appointment_date', dateStartStrict).lte('appointment_date', dateEndStrict);
   }
@@ -48,7 +44,7 @@ try {
     const client = app.clients;
     if (!client || !client.whatsapp_phone) continue;
 
-    // 2. CONDICIÓN CLAVE: Verificar si la clienta ya tiene una cita futura agendada
+    // Verificar si la clienta ya tiene una cita futura agendada
     const { data: futureApps } = await supabaseAdmin
       .from('appointments')
       .select('id, appointment_date')
@@ -64,10 +60,9 @@ try {
         phone: client.whatsapp_phone,
         nextDate: futureApps[0].appointment_date
       });
-      continue; // OMITIR: Ya tiene cita futura
+      continue;
     }
 
-    // Verificar si ya se le envió recordatorio previamente por esta cita
     const { data: existingLog } = await supabaseAdmin
       .from('reminder_logs')
       .select('id, sent_at')
@@ -77,15 +72,24 @@ try {
     const appDate = new Date(app.appointment_date);
     const diffDays = Math.max(0, Math.round((now.getTime() - appDate.getTime()) / (1000 * 3600 * 24)));
 
+    // Formatear teléfono con código de país Ecuador (+593) si no lo tiene
+    let cleanPhone = client.whatsapp_phone.replace(/[^0-9]/g, '');
+    if (cleanPhone.startsWith('09') && cleanPhone.length === 10) {
+      cleanPhone = '593' + cleanPhone.substring(1);
+    } else if (cleanPhone.startsWith('9') && cleanPhone.length === 9) {
+      cleanPhone = '593' + cleanPhone;
+    }
+
     const messageText = `Hola ${client.full_name}, se cumplen 3 semanas desde tu último servicio de uñas en ${studioName}. ¡Es momento de tu mantenimiento para mantener tus uñas sanas e impecables! Agenda tu espacio aquí: ${siteUrl}/#agendar`;
-    const cleanPhone = client.whatsapp_phone.replace(/[^0-9]/g, '');
-    const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(messageText)}`;
+    
+    // Usamos api.whatsapp.com que es mucho más compatible y evita pantallas en blanco en navegadores de escritorio
+    const whatsappUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(messageText)}`;
 
     candidates.push({
       appointment_id: app.id,
       client_id: client.id,
       client_name: client.full_name,
-      whatsapp_phone: client.whatsapp_phone,
+      whatsapp_phone: cleanPhone,
       service_name: app.services?.name || 'Servicio de Uñas',
       specialist_name: app.specialists?.full_name || 'Especialista',
       completion_date: app.appointment_date,
@@ -133,45 +137,24 @@ try {
     <div class="text-xs text-slate-500">
       {mode === 'test' ? (
         <span class="text-studio-700 font-semibold bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
-          ✓ Modo Pruebas Activo: Cualquier cita que marques como "Completada" aparecerá aquí al instante.
+          ✓ Modo Pruebas Activo: Cualquier cita completada hoy aparecerá aquí al instante.
         </span>
       ) : (
         <span class="text-slate-600">
-          Modo Producción: Mostrando solo citas completadas hace 21 días (3 semanas).
+          Modo Producción: Filtrando solo citas de hace 21 días (3 semanas).
         </span>
       )}
     </div>
   </div>
 
-  <!-- Banner Informativo -->
-  <div class="bg-gradient-to-r from-emerald-50 via-teal-50 to-white p-6 rounded-2xl border border-emerald-200/80 shadow-sm mb-8">
-    <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-      <div>
-        <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 uppercase tracking-wide">
-          Algoritmo de Retención Inteligente
-        </span>
-        <h2 class="font-serif text-xl font-bold text-slate-900 mt-1">Recordatorio Preventivo de Mantenimiento</h2>
-        <p class="text-xs text-slate-600 max-w-2xl mt-1">
-          Detecta las clientas atendidas. Si la clienta <strong>ya tiene una cita futura agendada en el sistema</strong>, la descarta automáticamente para evitar mensajes innecesarios.
-        </p>
-      </div>
-
-      <div class="flex items-center gap-3">
-        <button
-          type="button"
-          onclick="window.location.reload()"
-          class="px-4 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-sm transition-all"
-        >
-          🔄 Actualizar Lista
-        </button>
-        <button
-          type="button"
-          onclick={`triggerAutomatedCron('${mode}')`}
-          class="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all"
-        >
-          ⚡ Ejecutar Escaneo
-        </button>
-      </div>
+  <!-- Alerta de compatibilidad con navegadores -->
+  <div class="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 mb-6 flex items-start gap-3 text-xs text-amber-800">
+    <span class="text-base">💡</span>
+    <div>
+      <p class="font-semibold">Consejo para abrir WhatsApp en Computadora / Navegador Brave:</p>
+      <p class="text-amber-700 mt-0.5">
+        Si ya tienes WhatsApp Web abierto en otra pestaña, tu navegador puede mostrar pantalla gris por protección de sesión. El botón verde ahora usa el enlace directo universal, y también cuentas con el botón <strong>"Copiar Texto"</strong> para pegarlo directamente en tu chat.
+      </p>
     </div>
   </div>
 
@@ -206,7 +189,7 @@ try {
       <h3 class="font-serif text-lg font-bold text-slate-900">
         Clientas Pendientes de Recordatorio
       </h3>
-      <span class="text-xs text-slate-500">Un clic para abrir WhatsApp con plantilla personalizada</span>
+      <span class="text-xs text-slate-500">Un clic para abrir WhatsApp o copiar mensaje</span>
     </div>
 
     {candidates.length === 0 ? (
@@ -214,7 +197,7 @@ try {
         <span class="text-3xl">💅</span>
         <h4 class="font-serif font-bold text-slate-800 mt-2">No hay clientas pendientes en esta lista</h4>
         <p class="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-          Crea una cita en <a href="/" class="text-studio-600 underline">Agendar</a>, márcala como <strong class="text-emerald-700">"Completada"</strong> en la <a href="/admin/agenda" class="text-studio-600 underline">Agenda</a> y aparecerá aquí inmediatamente para que la pruebes.
+          Crea una cita en <a href="/" class="text-studio-600 underline">Agendar</a>, márcala como <strong class="text-emerald-700">"Completada"</strong> en la <a href="/admin/agenda" class="text-studio-600 underline">Agenda</a> y aparecerá aquí inmediatamente.
         </p>
       </div>
     ) : (
@@ -227,7 +210,7 @@ try {
               <th class="pb-3">Manicurista</th>
               <th class="pb-3 text-center">Antigüedad</th>
               <th class="pb-3 text-center">Estado Notificación</th>
-              <th class="pb-3 text-right">Acción WhatsApp</th>
+              <th class="pb-3 text-right">Opciones WhatsApp</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
@@ -237,7 +220,7 @@ try {
                 <tr class="hover:bg-slate-50/80 transition-colors">
                   <td class="py-3.5">
                     <span class="block font-bold text-slate-900 text-sm">{c.client_name}</span>
-                    <span class="block text-slate-400 text-[11px]">{c.whatsapp_phone}</span>
+                    <span class="block text-slate-400 text-[11px]">+{c.whatsapp_phone}</span>
                   </td>
                   <td class="py-3.5">
                     <span class="font-medium text-studio-700">{c.service_name}</span>
@@ -261,15 +244,29 @@ try {
                     )}
                   </td>
                   <td class="py-3.5 text-right">
-                    <a
-                      href={c.whatsapp_url}
-                      target="_blank"
-                      onclick={`markAsSent('${c.appointment_id}', '${c.client_id}', '${c.whatsapp_phone}', \`${c.message_text.replace(/`/g, '')}\`)`}
-                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm transition-transform active:scale-95"
-                    >
-                      <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981z"/></svg>
-                      <span>Enviar WhatsApp</span>
-                    </a>
+                    <div class="flex items-center justify-end gap-2">
+                      <!-- Botón Copiar Texto -->
+                      <button
+                        type="button"
+                        onclick={`copyMessage(\`${c.message_text.replace(/`/g, '')}\`)`}
+                        class="px-2.5 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium text-xs transition-colors"
+                        title="Copiar texto al portapapeles"
+                      >
+                        📋 Copiar
+                      </button>
+
+                      <!-- Botón Abrir WhatsApp Universal -->
+                      <a
+                        href={c.whatsapp_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onclick={`markAsSent('${c.appointment_id}', '${c.client_id}', '${c.whatsapp_phone}', \`${c.message_text.replace(/`/g, '')}\`)`}
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm transition-transform active:scale-95"
+                      >
+                        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981z"/></svg>
+                        <span>WhatsApp</span>
+                      </a>
+                    </div>
                   </td>
                 </tr>
               );
@@ -303,6 +300,14 @@ try {
   )}
 
   <script is:inline>
+    function copyMessage(text) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert('✓ Mensaje copiado al portapapeles. Ahora puedes pegarlo (Ctrl + V) directamente en tu chat de WhatsApp.');
+      }).catch(() => {
+        prompt('Copia este mensaje:', text);
+      });
+    }
+
     async function markAsSent(appointmentId, clientId, phone, messageText) {
       try {
         await fetch('/api/cron/reminders', {
@@ -318,21 +323,6 @@ try {
         });
       } catch (e) {
         console.error('Error al registrar recordatorio:', e);
-      }
-    }
-
-    async function triggerAutomatedCron(mode) {
-      const btn = event.target;
-      btn.textContent = 'Ejecutando...';
-      try {
-        const res = await fetch(`/api/cron/reminders?manual=true&mode=${mode}`);
-        const data = await res.json();
-        alert(`Escaneo completado exitosamente.\nTotal analizadas: ${data.total_examined}\nCandidatas a recordar: ${data.candidates_to_remind}\nOmitidas por ya tener cita futura: ${data.skipped_already_booked}`);
-        window.location.reload();
-      } catch (err) {
-        alert('Error en ejecución: ' + err.message);
-      } finally {
-        btn.textContent = '⚡ Ejecutar Escaneo';
       }
     }
   </script>

@@ -459,9 +459,11 @@ const today = new Date().toISOString().split('T')[0];
         document.getElementById('modal-service').textContent = servName;
         document.getElementById('modal-date').textContent = new Date(formData.appointment_date).toLocaleString('es-EC', { dateStyle: 'full', timeStyle: 'short' });
 
-        const cleanPhone = formData.whatsapp_phone.replace(/[^0-9]/g, '');
+        let cleanClientPhone = formData.whatsapp_phone.replace(/[^0-9]/g, '');
+        if (cleanClientPhone.startsWith('09') && cleanClientPhone.length === 10) cleanClientPhone = '593' + cleanClientPhone.substring(1);
+        
         const waMsg = `¡Hola Darshall Estudio! Acabo de reservar mi cita para ${servName} con ${specName} el día ${formData.appointment_date}. Mi nombre es ${formData.full_name}.`;
-        document.getElementById('whatsapp-confirm-link').href = `https://wa.me/593991234567?text=${encodeURIComponent(waMsg)}`;
+        document.getElementById('whatsapp-confirm-link').href = `https://api.whatsapp.com/send?phone=${cleanClientPhone}&text=${encodeURIComponent(waMsg)}`;
 
         modal.classList.remove('hidden');
       } catch (err) {

@@ -109,9 +109,14 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
-    // 3. Registrar o actualizar clienta (por teléfono de WhatsApp)
+    // 3. Registrar o actualizar clienta (por teléfono de WhatsApp con formato internacional)
     let clientId: string;
-    const cleanPhone = whatsapp_phone.replace(/\s+/g, '');
+    let cleanPhone = whatsapp_phone.replace(/[^0-9]/g, '');
+    if (cleanPhone.startsWith('09') && cleanPhone.length === 10) {
+      cleanPhone = '593' + cleanPhone.substring(1);
+    } else if (cleanPhone.startsWith('9') && cleanPhone.length === 9) {
+      cleanPhone = '593' + cleanPhone;
+    }
 
     const { data: existingClient, error: clientFetchError } = await supabaseAdmin
       .from('clients')
